@@ -1,49 +1,43 @@
 import socket, json, secrets, math
 
 # ---------- Paillier Encryption ----------
-class PaillierClient:
-    def __init__(self, n, g):
-        self.n = n
-        self.n2 = n*n
-        self.g = g
+def paillier_encrypt(m, n, g):
+    n2 = n * n
+    r = secrets.randbelow(n - 1) + 1
+    c = (pow(g, m, n2) * pow(r, n, n2)) % n2
+    return c
 
-    def encrypt(self, m):
-        r = secrets.randbelow(self.n-1)+1
-        return (pow(self.g, m, self.n2) * pow(r, self.n, self.n2)) % self.n2
+# ---------- Seller Client ----------
+def connect_to_server(name, transactions, host="127.0.0.1", port=5000):
+    s = socket.socket()
+    s.connect((host, port))
 
-# ---------- Client ----------
-class SellerClient:
-    def __init__(self, name):
-        self.name = name
-        self.transactions = []
-        self.pubkey = None
+    # Receive public key from server
+    data = json.loads(s.recv(8192).decode())
+    n, g = data["pubkey"]
+    print(f"[CLIENT] Connected to server. Got Paillier key (n={n})")
 
-    def connect(self, host="127.0.0.1", port=5000):
-        s = socket.socket()
-        s.connect((host, port))
-        data = json.loads(s.recv(8192).decode())
-        n,g = data["pubkey"]
-        self.pubkey = PaillierClient(n,g)
-        print(f"[CLIENT] Connected to server. Got Paillier key (n={n})")
+    # Encrypt each transaction
+    encrypted_transactions = []
+    for amt in transactions:
+        paisa = int(round(amt * 100))
+        c = paillier_encrypt(paisa, n, g)
+        encrypted_transactions.append(c)
 
-        for i, amt in enumerate(self.transactions):
-            paisa = int(round(amt*100))
-            c = self.pubkey.encrypt(paisa)
-            self.transactions[i] = c
-
-        send_data = {
-            "seller": self.name,
-            "transactions": self.transactions
-        }
-        s.send(json.dumps(send_data).encode())
-        msg = s.recv(4096).decode()
-        print("[SERVER REPLY]:", msg)
-        s.close()
+    # Send encrypted data
+    send_data = {
+        "seller": name,
+        "transactions": encrypted_transactions
+    }
+    s.send(json.dumps(send_data).encode())
+    msg = s.recv(4096).decode()
+    print("[SERVER REPLY]:", msg)
+    s.close()
 
 # ---------- Menu ----------
 def main():
     name = input("Enter Seller Name: ")
-    client = SellerClient(name)
+    transactions = []
 
     while True:
         print(f"""
@@ -53,13 +47,21 @@ def main():
 3. Exit
 """)
         ch = input("Enter choice: ")
+
         if ch == "1":
             amt = float(input("Enter amount (INR): "))
-            client.transactions.append(amt)
+            transactions.append(amt)
+
         elif ch == "2":
-            client.connect()
+            if not transactions:
+                print("No transactions to send.")
+            else:
+                connect_to_server(name, transactions)
+
         elif ch == "3":
+            print("Exiting client.")
             break
+
         else:
             print("Invalid choice.")
 
